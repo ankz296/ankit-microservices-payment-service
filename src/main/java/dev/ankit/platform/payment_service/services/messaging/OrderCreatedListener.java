@@ -26,6 +26,7 @@ public class OrderCreatedListener {
     @KafkaListener(topics = "order.created", groupId = "payment-service-group")
     public void onMessage(String message) {
         try {
+            String eventId = java.util.UUID.randomUUID().toString();
             OrderCreatedEvent event = objectMapper.readValue(message, OrderCreatedEvent.class);
             log.info("📥 Received order.created event orderId={}", event.getOrderId());
 
@@ -42,6 +43,7 @@ public class OrderCreatedListener {
 
             if (success) {
                 PaymentProcessedEvent processed = PaymentProcessedEvent.builder()
+                        .eventId(eventId)
                         .orderId(event.getOrderId())
                         .paymentId(payment.getId())
                         .userId(event.getUserId())
@@ -54,6 +56,7 @@ public class OrderCreatedListener {
 
             } else {
                 PaymentFailedEvent failed = PaymentFailedEvent.builder()
+                        .eventId(eventId)
                         .orderId(event.getOrderId())
                         .paymentId(payment.getId())
                         .userId(event.getUserId())

@@ -12,6 +12,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @Builder
 public class PaymentFailedEvent {
+    private String eventId;
     private UUID orderId;
     private UUID paymentId;
     private UUID userId;

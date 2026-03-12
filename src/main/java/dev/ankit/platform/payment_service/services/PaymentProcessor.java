@@ -15,6 +15,16 @@ public class PaymentProcessor {
     @Value("${payment.simulator.success-rate:80}")
     private int successRate;
 
+    /**
+     * Real world: Bank / Payment Gateway decide karta hai
+     * Tumhara system: PaymentSimulator decide karta hai
+     * Why?
+     *
+     * Failure injection
+     * Chaos testing
+     * Saga + compensation validate karne ke liye
+     * @return
+     */
     public boolean isPaymentSuccessful() {
         if ("ALWAYS_SUCCESS".equalsIgnoreCase(mode)) return true;
         if ("ALWAYS_FAIL".equalsIgnoreCase(mode)) return false;
