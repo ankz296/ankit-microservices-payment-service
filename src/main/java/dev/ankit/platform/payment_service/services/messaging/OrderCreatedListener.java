@@ -6,12 +6,15 @@ import dev.ankit.platform.payment_service.domain.PaymentStatus;
 import dev.ankit.platform.payment_service.dto.OrderCreatedEvent;
 import dev.ankit.platform.payment_service.dto.PaymentFailedEvent;
 import dev.ankit.platform.payment_service.dto.PaymentProcessedEvent;
+import dev.ankit.platform.payment_service.exception.InvalidEventException;
 import dev.ankit.platform.payment_service.services.PaymentProcessor;
 import dev.ankit.platform.payment_service.services.PaymentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -25,12 +28,24 @@ public class OrderCreatedListener {
 
     @KafkaListener(topics = "order.created", groupId = "payment-service-group")
     public void onMessage(String message) {
+
         try {
-            String eventId = java.util.UUID.randomUUID().toString();
-            OrderCreatedEvent event = objectMapper.readValue(message, OrderCreatedEvent.class);
-            log.info("📥 Received order.created event orderId={}", event.getOrderId());
+            OrderCreatedEvent event =
+                    objectMapper.readValue(message, OrderCreatedEvent.class);
+
+            if (event.getOrderId() == null || event.getUserId() == null) {
+                throw new InvalidEventException("Missing required fields in order.created event");
+            }
+
+            String eventId = UUID.randomUUID().toString();
+
+            log.info("Processing order.created event orderId={}, userId={}",
+                    event.getOrderId(), event.getUserId());
 
             boolean success = paymentProcessor.isPaymentSuccessful();
+
+            log.info("Payment decision orderId={}, success={}",
+                    event.getOrderId(), success);
 
             Payment payment = paymentService.createPayment(
                     event.getOrderId(),
@@ -42,6 +57,7 @@ public class OrderCreatedListener {
             long now = System.currentTimeMillis();
 
             if (success) {
+
                 PaymentProcessedEvent processed = PaymentProcessedEvent.builder()
                         .eventId(eventId)
                         .orderId(event.getOrderId())
@@ -54,7 +70,11 @@ public class OrderCreatedListener {
 
                 publisher.publishProcessed(processed);
 
+                log.info("Payment processed successfully orderId={}, paymentId={}",
+                        event.getOrderId(), payment.getId());
+
             } else {
+
                 PaymentFailedEvent failed = PaymentFailedEvent.builder()
                         .eventId(eventId)
                         .orderId(event.getOrderId())
@@ -67,11 +87,22 @@ public class OrderCreatedListener {
                         .build();
 
                 publisher.publishFailed(failed);
+
+                log.warn("Payment failed orderId={}, paymentId={}",
+                        event.getOrderId(), payment.getId());
             }
 
+        } catch (InvalidEventException e) {
+            // ❌ BAD EVENT → skip (no retry)
+            log.warn("Invalid event skipped payload={}, reason={}", message, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            // ❌ Business issue → skip
+            log.warn("Business validation failed payload={}, reason={}", message, e.getMessage());
         } catch (Exception e) {
-            log.error("❌ Failed to process order.created message={}", message, e);
-            // Later: DLQ / retry strategy
+            // ✅ SYSTEM FAILURE → retry + DLQ
+            log.error("System failure processing order.created payload={}", message, e);
+
+            throw new RuntimeException(e);
         }
     }
 }
